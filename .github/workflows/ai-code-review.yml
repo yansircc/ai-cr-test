@@ -16,15 +16,9 @@ jobs:
       - name: Get PR Diff
         run: gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
 
-      - name: Get Context
-        run: |
-          echo "README" > /tmp/context.txt
-          cat README.md >> /tmp/context.txt 2>/dev/null || echo "not found" >> /tmp/context.txt
-
       - name: Call Claude API
         run: |
           DIFF=$(cat /tmp/diff.txt)
-          CTX=$(cat /tmp/context.txt)
 
           RESPONSE=$(curl -s "https://ccc.210k.cc/v1/messages" \
             -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
@@ -34,27 +28,14 @@ jobs:
               \"model\": \"claude-haiku-4-5-20251001\",
               \"max_tokens\": 500,
               \"messages\": [
-                {\"role\": \"system\", \"content\": \"你是代码审查专家，用中文回复\"},
+                {\"role\": \"system\", \"content\": \"你是代码审查专家\"},
                 {\"role\": \"user\", \"content\": \"PR改动:\\n$DIFF\"}
               ]
             }")
 
-          echo "$RESPONSE" > /tmp/response.json
           jq -r '.content[0].text // .error.message' /tmp/response.json > /tmp/review.txt
-
-      - name: Show Review
-        run: cat /tmp/review.txt
 
       - name: Post Review Comment
         run: |
-          # 使用 heredoc 创建文件
-          cat > /tmp/body.txt << 'ENDOFMARKDOWN'
-          ## AI Code Review
-
-          Test comment
-
-          ---
-          *AI generated*
-          ENDOFMARKDOWN
-
-          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file /tmp/body.txt
+          set -x
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "AI Review test"
