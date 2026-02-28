@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,31 +18,36 @@ jobs:
 
       - name: Get Context
         run: |
-          cat README.md > /tmp/context.txt 2>/dev/null || true
-          cat src/main.py >> /tmp/context.txt 2>/dev/null || true
+          echo "README" > /tmp/context.txt
+          cat README.md >> /tmp/context.txt 2>/dev/null || echo "not found" >> /tmp/context.txt
+          echo "=== main.py ===" >> /tmp/context.txt
+          cat src/main.py >> /tmp/context.txt 2>/dev/null || echo "not found" >> /tmp/context.txt
 
       - name: Call Claude API
-        env:
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
         run: |
-          DIFF="$(cat /tmp/diff.txt)"
-          CTX="$(cat /tmp/context.txt)"
+          DIFF=$(cat /tmp/diff.txt)
+          CTX=$(cat /tmp/context.txt)
 
-          curl -s "https://ccc.210k.cc/v1/messages" \
+          RESPONSE=$(curl -s "https://ccc.210k.cc/v1/messages" \
             -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
             -H "Content-Type: application/json" \
             -H "anthropic-version: 2023-06-01" \
-            -d "{\"model\":\"claude-haiku-4-5-20251001\",\"max_tokens\":1000,\"messages\":[{\"role\":\"system\",\"content\":\"你是代码审查专家\"},{\"role\":\"user\",\"content\":\"PR改动:\n$DIFF\n\n项目上下文:\n$CTX\"}]}" > /tmp/response.json
+            -d "{
+              \"model\": \"claude-haiku-4-5-20251001\",
+              \"max_tokens\": 1000,
+              \"messages\": [
+                {\"role\": \"system\", \"content\": \"你是代码审查专家\"},
+                {\"role\": \"user\", \"content\": \"PR改动:\\n$DIFF\\n\\n项目上下文:\\n$CTX\"}
+              ]
+            }")
 
+          echo "$RESPONSE" > /tmp/response.json
           jq -r '.content[0].text // .error.message' /tmp/response.json > /tmp/review.txt
-
-      - name: Debug Review Content
-        run: |
-          echo "=== Review Content ==="
-          cat /tmp/review.txt
-          echo "======================"
 
       - name: Post Review Comment
         run: |
-          REVIEW=$(cat /tmp/review.txt | tr '\n' ' ')
-          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "AI Review: $REVIEW"
+          # 将多行内容转为单行，移除特殊字符
+          REVIEW=$(cat /tmp/review.txt | head -20)
+          BODY="## AI Code Review\n\n$REVIEW\n\n---\n*AI generated*"
+          echo -e "$BODY" > /tmp/body.txt
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file /tmp/body.txt
