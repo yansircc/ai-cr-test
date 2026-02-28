@@ -35,10 +35,13 @@ jobs:
 
           jq -r '.content[0].text // .error.message' /tmp/response.json > /tmp/review.txt
 
+      - name: Debug Review Content
+        run: |
+          echo "=== Review Content ==="
+          cat /tmp/review.txt
+          echo "======================"
+
       - name: Post Review Comment
         run: |
-          REVIEW=$(cat /tmp/review.txt)
-          echo "Review content:"
-          echo "$REVIEW"
-          echo "$REVIEW" > /tmp/body.txt
-          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file /tmp/body.txt
+          REVIEW=$(cat /tmp/review.txt | tr '\n' ' ')
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "AI Review: $REVIEW"
