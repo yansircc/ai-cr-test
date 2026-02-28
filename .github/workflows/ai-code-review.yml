@@ -20,8 +20,6 @@ jobs:
         run: |
           echo "README" > /tmp/context.txt
           cat README.md >> /tmp/context.txt 2>/dev/null || echo "not found" >> /tmp/context.txt
-          echo "=== main.py ===" >> /tmp/context.txt
-          cat src/main.py >> /tmp/context.txt 2>/dev/null || echo "not found" >> /tmp/context.txt
 
       - name: Call Claude API
         run: |
@@ -34,20 +32,29 @@ jobs:
             -H "anthropic-version: 2023-06-01" \
             -d "{
               \"model\": \"claude-haiku-4-5-20251001\",
-              \"max_tokens\": 1000,
+              \"max_tokens\": 500,
               \"messages\": [
-                {\"role\": \"system\", \"content\": \"你是代码审查专家\"},
-                {\"role\": \"user\", \"content\": \"PR改动:\\n$DIFF\\n\\n项目上下文:\\n$CTX\"}
+                {\"role\": \"system\", \"content\": \"你是代码审查专家，用中文回复\"},
+                {\"role\": \"user\", \"content\": \"PR改动:\\n$DIFF\"}
               ]
             }")
 
           echo "$RESPONSE" > /tmp/response.json
           jq -r '.content[0].text // .error.message' /tmp/response.json > /tmp/review.txt
 
+      - name: Show Review
+        run: cat /tmp/review.txt
+
       - name: Post Review Comment
         run: |
-          # 将多行内容转为单行，移除特殊字符
-          REVIEW=$(cat /tmp/review.txt | head -20)
-          BODY="## AI Code Review\n\n$REVIEW\n\n---\n*AI generated*"
-          echo -e "$BODY" > /tmp/body.txt
+          # 使用 heredoc 创建文件
+          cat > /tmp/body.txt << 'ENDOFMARKDOWN'
+          ## AI Code Review
+
+          Test comment
+
+          ---
+          *AI generated*
+          ENDOFMARKDOWN
+
           gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file /tmp/body.txt
