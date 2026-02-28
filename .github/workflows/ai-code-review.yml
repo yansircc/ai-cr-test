@@ -9,42 +9,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Debug
-        run: |
-          echo "=== Debug Info ==="
-          echo "PR: ${{ github.event.pull_request.number }}"
-          echo "Repo: ${{ github.repository }}"
-          which gh
-          gh --version
-          echo "=== GH Auth ==="
-          gh auth status
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Get PR Diff
         run: |
           gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/pr_diff.txt
-          echo "Diff length: $(wc -c < /tmp/pr_diff.txt)"
+          echo "diff_size=$(wc -c < /tmp/pr_diff.txt)" >> $GITHUB_OUTPUT
 
       - name: AI Code Review
         env:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
         run: |
-          CONTENT="项目上下文文件内容..."
           DIFF=$(cat /tmp/pr_diff.txt)
 
-          USER_MSG="PR 改动：$DIFF"
+          # 使用更简单的方式构建 JSON
+          PAYLOAD=$(cat <<JSONEOF
+          {
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1500,
+            "system": "你是代码审查专家",
+            "messages": [{"role": "user", "content": "请审查以下 PR 改动，给出审查意见：$DIFF"}]
+          }
+          JSONEOF
+          )
 
           RESPONSE=$(curl -s "https://ccc.210k.cc/v1/messages" \
             -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
             -H "Content-Type: application/json" \
             -H "anthropic-version: 2023-06-01" \
-            -d '{
-              "model": "claude-haiku-4-5-20251001",
-              "max_tokens": 200,
-              "messages": [{"role": "user", "content": '"$(echo "$USER_MSG" | jq -Rs .)"'}]}')
+            -d "$PAYLOAD")
 
-          echo "Response: $RESPONSE"
-          AI_REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // .error.message // .')
+          echo "API Response: $RESPONSE"
+          AI_REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // .error.message // "Error"')
           echo "$AI_REVIEW" > /tmp/ai_review.txt
 
       - name: Post Review Comment
@@ -53,6 +50,9 @@ jobs:
           AI_REVIEW=$(cat /tmp/ai_review.txt)
           gh pr comment ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
-            --body "## AI Review
+            --body "## AI Code Review
 
-$AI_REVIEW"
+$AI_REVIEW
+
+---
+*AI generated*"
