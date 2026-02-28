@@ -14,74 +14,67 @@ jobs:
           fetch-depth: 0
 
       - name: Get PR Diff
-        id: diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DIFF=$(gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }})
-          echo "diff<<EOF" >> $GITHUB_OUTPUT
-          echo "$DIFF" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/pr_diff.txt
+          echo "Diff saved, length: $(wc -c < /tmp/pr_diff.txt) bytes"
 
       - name: Read Context Files
-        id: context
         run: |
-          CONTEXT_FILES="README.md src/main.py"
-          CONTENT=""
-
-          for file in $CONTEXT_FILES; do
-            if [ -f "$file" ]; then
-              CONTENT="$CONTENT
-
---- 文件: $file ---
-$(cat "$file")"
-            fi
-          done
-          echo "content<<EOF" >> $GITHUB_OUTPUT
-          echo "$CONTENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "=== README.md ===" > /tmp/context.txt
+          cat README.md >> /tmp/context.txt 2>/dev/null || echo "README not found" >> /tmp/context.txt
+          echo "" >> /tmp/context.txt
+          echo "=== src/main.py ===" >> /tmp/context.txt
+          cat src/main.py >> /tmp/context.txt 2>/dev/null || echo "src/main.py not found" >> /tmp/context.txt
+          echo "Context saved"
 
       - name: AI Code Review
-        id: review
         env:
           ANTHROPIC_BASE_URL: "https://ccc.210k.cc"
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
         run: |
-          # 使用 heredoc 避免 JSON 转义问题
-          cat > /tmp/review.json << 'JSONEOF'
-          {
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 2000,
-            "system": "你是一个资深的代码审查专家。请根据项目上下文文件理解项目架构和规范，然后审查 PR 改动。",
-            "messages": [{"role": "user", "content": "## 项目上下文（供参考）\n${{ steps.context.outputs.content }}\n\n## PR 改动（Diff）\n${{ steps.diff.outputs.diff }}\n\n请审查以上 PR 改动，以 Markdown 格式输出审查意见。重点关注：\n1. 代码风格是否与项目一致\n2. 是否有潜在 bug\n3. 是否有重复逻辑\n4. 可以改进的地方"}]
-          }
-          JSONEOF
+          # 读取上下文和 diff
+          CONTENT=$(cat /tmp/context.txt)
+          DIFF=$(cat /tmp/pr_diff.txt)
 
+          # 构建 JSON payload（使用单行避免复杂转义）
+          USER_MSG="项目上下文：
+$CONTENT
+
+PR 改动（Diff）：
+$DIFF
+
+请审查以上 PR 改动，以 Markdown 格式输出审查意见。"
+
+          # 将消息写入临时文件
+          printf '%s' "$USER_MSG" > /tmp/user_msg.txt
+
+          # 调用 Claude API
           RESPONSE=$(curl -s "$ANTHROPIC_BASE_URL/v1/messages" \
             -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
             -H "Content-Type: application/json" \
             -H "anthropic-version: 2023-06-01" \
-            -d @/tmp/review.json)
+            -d '{
+              "model": "claude-haiku-4-5-20251001",
+              "max_tokens": 2000,
+              "system": "你是一个资深的代码审查专家。请根据项目上下文理解项目架构和规范，然后审查 PR 改动。",
+              "messages": [{"role": "user", "content": "'"$(cat /tmp/user_msg.txt | jq -Rs .)"'"}]
+            }')
 
-          echo "$RESPONSE" > /tmp/response.json
-
-          AI_REVIEW=$(cat /tmp/response.json | jq -r '.content[0].text // empty')
-
-          if [ -z "$AI_REVIEW" ]; then
-            AI_REVIEW=$(cat /tmp/response.json | jq -r '.error.message // .')
-          fi
+          # 提取回复
+          AI_REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // .error.message // .' 2>/dev/null)
 
           echo "=== AI Review Result ==="
           echo "$AI_REVIEW"
-
-          # 保存结果（使用 base64 避免特殊字符问题）
-          echo "$AI_REVIEW" | base64 > /tmp/ai_review.txt
+          echo "$AI_REVIEW" > /tmp/ai_review.txt
 
       - name: Post Review Comment
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          AI_REVIEW=$(cat /tmp/ai_review.txt | base64 -d)
+          AI_REVIEW=$(cat /tmp/ai_review.txt)
 
           COMMENT_BODY="## 🤖 AI Code Review
 
