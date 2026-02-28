@@ -9,71 +9,49 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Get PR Info
-        run: |
-          echo "PR: ${{ github.event.pull_request.number }}"
 
       - name: Get PR Diff
         run: |
-          gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/pr_diff.txt
-          echo "Saved diff, size: $(wc -c < /tmp/pr_diff.txt) bytes"
+          gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
+          echo "Diff saved: $(wc -l < /tmp/diff.txt) lines"
 
-      - name: Read Context Files
+      - name: Get Context
         run: |
-          echo "=== README ===" > /tmp/context.txt
-          cat README.md >> /tmp/context.txt 2>/dev/null || true
-          echo -e "\n=== main.py ===" >> /tmp/context.txt
-          cat src/main.py >> /tmp/context.txt 2>/dev/null || true
+          echo "README:" > /tmp/context.txt
+          cat README.md >> /tmp/context.txt 2>/dev/null || echo "not found" >> /tmp/context.txt
+          echo "main.py:" >> /tmp/context.txt
+          cat src/main.py >> /tmp/context.txt 2>/dev/null || echo "not found" >> /tmp/context.txt
 
-      - name: AI Code Review
+      - name: Call Claude API
         env:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
         run: |
-          # 获取文件内容
-          DIFF_CONTENT=$(cat /tmp/pr_diff.txt)
-          CONTEXT_CONTENT=$(cat /tmp/context.txt)
+          DIFF=$(cat /tmp/diff.txt)
+          CTX=$(cat /tmp/context.txt)
 
-          # 构建请求
-          cat > /tmp/request.json << ENDOFDATA
-          {
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 1500,
-            "system": "你是代码审查专家",
-            "messages": [
-              {
-                "role": "user",
-                "content": "请审查以下 PR 改动。参考项目上下文：\n\n${CONTEXT_CONTENT}\n\nPR Diff:\n${DIFF_CONTENT}"
-              }
-            ]
-          }
-          ENDOFDATA
-
-          # 调用 API
-          RESPONSE=$(curl -s "https://ccc.210k.cc/v1/messages" \
+          curl -s "https://ccc.210k.cc/v1/messages" \
             -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
             -H "Content-Type: application/json" \
             -H "anthropic-version: 2023-06-01" \
-            -d @/tmp/request.json)
+            -d "{
+              \"model\": \"claude-haiku-4-5-20251001\",
+              \"max_tokens\": 1000,
+              \"messages\": [
+                {\"role\": \"system\", \"content\": \"你是一个代码审查专家\"},
+                {\"role\": \"user\", \"content\": \"PR改动:\\n$DIFF\\n\\n项目上下文:\\n$CTX\"}
+              ]
+            }" > /tmp/response.json
 
-          echo "API Response length: $(echo $RESPONSE | wc -c)"
+          cat /tmp/response.json | jq -r '.content[0].text // .error.message' > /tmp/review.txt
 
-          # 提取结果
-          AI_REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // .error.message // "No response"' 2>/dev/null)
-          echo "AI Review: $AI_REVIEW"
-          echo "$AI_REVIEW" > /tmp/ai_review.txt
-
-      - name: Post Comment
-        if: success()
+      - name: Post Review
         run: |
-          AI_REVIEW=$(cat /tmp/ai_review.txt)
+          REVIEW=$(cat /tmp/review.txt)
           gh pr comment ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
             --body "## AI Code Review
 
-$AI_REVIEW
+$REVIEW
 
 ---
-*Automated by AI*"
+*AI generated*"
