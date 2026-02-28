@@ -37,5 +37,8 @@ jobs:
 
       - name: Post Review Comment
         run: |
-          REVIEW="$(cat /tmp/review.txt)"
-          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "$REVIEW"
+          REVIEW=$(cat /tmp/review.txt)
+          echo "Review content:"
+          echo "$REVIEW"
+          echo "$REVIEW" > /tmp/body.txt
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file /tmp/body.txt
