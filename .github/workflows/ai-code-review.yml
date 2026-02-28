@@ -7,24 +7,18 @@ on:
 jobs:
   ai-review:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Debug Info
-        run: |
-          echo "PR Number: ${{ github.event.pull_request.number }}"
-          echo "Repo: ${{ github.repository }}"
-          echo "Event: ${{ github.event_name }}"
-          echo "GH Token exists: ${{ secrets.GITHUB_TOKEN != '' }}"
+      - uses: actions/checkout@v4
 
       - name: Get PR Diff
-        run: |
-          echo "Getting PR diff..."
-          gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
-          echo "Diff lines: $(wc -l < /tmp/diff.txt)"
+        run: gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
 
-      - name: Get Context Files
+      - name: Get Context
         run: |
-          echo "Context" > /tmp/context.txt
-          cat README.md >> /tmp/context.txt 2>/dev/null || echo "no README" >> /tmp/context.txt
+          cat README.md > /tmp/context.txt 2>/dev/null || true
+          cat src/main.py >> /tmp/context.txt 2>/dev/null || true
 
       - name: Call Claude API
         env:
@@ -44,5 +38,4 @@ jobs:
       - name: Post Review Comment
         run: |
           REVIEW="$(cat /tmp/review.txt)"
-          echo "Review: $REVIEW"
           gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "$REVIEW"
