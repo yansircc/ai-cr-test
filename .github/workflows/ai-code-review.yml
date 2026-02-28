@@ -3,6 +3,7 @@ name: AI Code Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 jobs:
   ai-review:
@@ -12,9 +13,16 @@ jobs:
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Get PR Diff
-        run: gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
+          else
+            git diff main...HEAD > /tmp/diff.txt
+          fi
 
       - name: Call Claude API
         run: |
@@ -40,9 +48,14 @@ jobs:
         run: |
           REVIEW=$(cat /tmp/review.txt)
           echo "Review: $REVIEW"
-          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "## AI Code Review
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "## AI Code Review
 
 $REVIEW
 
 ---
 *AI generated*"
+          else
+            echo "Not a PR event, skipping comment"
+          fi
