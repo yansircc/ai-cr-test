@@ -33,9 +33,16 @@ jobs:
               ]
             }")
 
+          echo "$RESPONSE" > /tmp/response.json
           jq -r '.content[0].text // .error.message' /tmp/response.json > /tmp/review.txt
 
       - name: Post Review Comment
         run: |
-          set -x
-          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "AI Review test"
+          REVIEW=$(cat /tmp/review.txt)
+          echo "Review: $REVIEW"
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "## AI Code Review
+
+$REVIEW
+
+---
+*AI generated*"
