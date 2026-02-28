@@ -1,0 +1,61 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Get PR Diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
+          else
+            git diff main...HEAD > /tmp/diff.txt
+          fi
+
+      - name: Call Claude API
+        run: |
+          DIFF=$(cat /tmp/diff.txt)
+
+          RESPONSE=$(curl -s "https://ccc.210k.cc/v1/messages" \
+            -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "{
+              \"model\": \"claude-haiku-4-5-20251001\",
+              \"max_tokens\": 500,
+              \"messages\": [
+                {\"role\": \"system\", \"content\": \"你是代码审查专家\"},
+                {\"role\": \"user\", \"content\": \"PR改动:\\n$DIFF\"}
+              ]
+            }")
+
+          echo "$RESPONSE" > /tmp/response.json
+          jq -r '.content[0].text // .error.message' /tmp/response.json > /tmp/review.txt
+
+      - name: Post Review Comment
+        run: |
+          REVIEW=$(cat /tmp/review.txt)
+          echo "Review: $REVIEW"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "## AI Code Review
+
+$REVIEW
+
+---
+*AI generated*"
+          else
+            echo "Not a PR event, skipping comment"
+          fi
