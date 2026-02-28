@@ -8,17 +8,23 @@ jobs:
   ai-review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Debug Info
+        run: |
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+          echo "Repo: ${{ github.repository }}"
+          echo "Event: ${{ github.event_name }}"
+          echo "GH Token exists: ${{ secrets.GITHUB_TOKEN != '' }}"
 
       - name: Get PR Diff
-        run: gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
+        run: |
+          echo "Getting PR diff..."
+          gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} > /tmp/diff.txt
+          echo "Diff lines: $(wc -l < /tmp/diff.txt)"
 
       - name: Get Context Files
         run: |
-          echo "README" > /tmp/context.txt
-          cat README.md >> /tmp/context.txt 2>/dev/null || true
-          echo "---" >> /tmp/context.txt
-          cat src/main.py >> /tmp/context.txt 2>/dev/null || true
+          echo "Context" > /tmp/context.txt
+          cat README.md >> /tmp/context.txt 2>/dev/null || echo "no README" >> /tmp/context.txt
 
       - name: Call Claude API
         env:
@@ -38,5 +44,5 @@ jobs:
       - name: Post Review Comment
         run: |
           REVIEW="$(cat /tmp/review.txt)"
-          echo "AI Review: $REVIEW"
+          echo "Review: $REVIEW"
           gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "$REVIEW"
