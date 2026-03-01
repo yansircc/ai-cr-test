@@ -70,8 +70,7 @@ jobs:
 
           # 调用 Claude Code CLI
           REVIEW=$(claude -p "$(cat /tmp/review-prompt.txt)" \
-            --model claude-haiku-4-5-20251001 \
-            --max-tokens 4096)
+            --model claude-haiku-4-5-20251001)
 
           echo "$REVIEW" > /tmp/review-result.txt
 
