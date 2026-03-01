@@ -97,11 +97,14 @@ jobs:
         run: npm install -g @openai/codex
 
       - name: Configure Codex
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           mkdir -p ~/.codex
           cat > ~/.codex/config.toml << 'TOML'
           model_provider = "relay"
           model = "gpt-5.3-codex-spark"
+          preferred_auth_method = "apikey"
 
           [model_providers.relay]
           name = "relay"
@@ -109,6 +112,7 @@ jobs:
           wire_api = "responses"
           requires_openai_auth = true
           TOML
+          echo "{\"OPENAI_API_KEY\": \"$OPENAI_API_KEY\"}" > ~/.codex/auth.json
 
       - name: Run Codex Review
         env:
