@@ -119,7 +119,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           git fetch origin main
-          codex review --base origin/main 2>&1 > /tmp/codex-raw.txt || true
+          codex review --base origin/main > /tmp/codex-raw.txt 2>&1 || true
           # 提取最后一个 "codex" 标记之后的内容（即真正的 review）
           tac /tmp/codex-raw.txt | sed '/^codex$/q' | tac | sed '1d' > /tmp/codex-review-result.txt
 
