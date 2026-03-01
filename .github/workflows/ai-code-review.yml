@@ -9,7 +9,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  ai-review:
+  claude-review:
+    name: Claude Code Review
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,22 +28,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 获取 PR diff
           gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
-
-          # 获取 PR 标题和描述
           gh pr view ${{ github.event.pull_request.number }} \
             --json title,body --jq '"Title: \(.title)\nDescription: \(.body)"' > /tmp/pr-info.txt
-
-          # 截断过大的 diff（保留前 60KB，避免 token 超限）
           truncate -s '<60000' /tmp/pr-diff.txt
 
-      - name: Run AI Code Review
+      - name: Run Claude Review
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          # 构造 prompt 文件，避免命令行参数过长
           cat > /tmp/review-prompt.txt << 'PROMPT_END'
           你是一位资深代码审查专家。请审查以下 PR 的改动，用中文输出，格式如下：
 
@@ -57,37 +52,83 @@ jobs:
 
           ## 总体评价
           用一句话总结你对这个 PR 的评价
-
           ---
           以下是 PR 信息和 diff：
-
           PROMPT_END
 
-          # 拼接 PR 信息和 diff
           cat /tmp/pr-info.txt >> /tmp/review-prompt.txt
           echo -e "\n\n--- Diff ---\n" >> /tmp/review-prompt.txt
           cat /tmp/pr-diff.txt >> /tmp/review-prompt.txt
 
-          # 调用 Claude Code CLI
           REVIEW=$(claude -p "$(cat /tmp/review-prompt.txt)" \
             --model claude-haiku-4-5-20251001)
 
           echo "$REVIEW" > /tmp/review-result.txt
 
-      - name: Post Review Comment
+      - name: Post Claude Review Comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          REVIEW=$(cat /tmp/review-result.txt)
+          BODY=$(cat <<EOF
+          ## Claude Code Review
 
-          # 使用 heredoc 避免变量中的特殊字符问题
-          gh pr comment ${{ github.event.pull_request.number }} \
-            --body "$(cat <<EOF
-          ## AI Code Review
-
-          ${REVIEW}
+          $(cat /tmp/review-result.txt)
 
           ---
-          *Powered by Claude Code (Haiku) via CI*
+          *Powered by Claude Code (Haiku)*
           EOF
-          )"
+          )
+          gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+
+  codex-review:
+    name: Codex Code Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Configure Codex
+        run: |
+          mkdir -p ~/.codex
+          cat > ~/.codex/config.toml << 'TOML'
+          model_provider = "relay"
+          model = "gpt-5.3-codex-spark"
+
+          [model_providers.relay]
+          name = "relay"
+          base_url = "https://ccc.210k.cc/openai"
+          wire_api = "responses"
+          requires_openai_auth = true
+          TOML
+
+      - name: Run Codex Review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          git fetch origin main
+          REVIEW=$(codex review --base origin/main 2>&1 | tail -n +2)
+          echo "$REVIEW" > /tmp/codex-review-result.txt
+
+      - name: Post Codex Review Comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(cat <<EOF
+          ## Codex Code Review
+
+          $(cat /tmp/codex-review-result.txt)
+
+          ---
+          *Powered by OpenAI Codex (gpt-5.3-codex-spark)*
+          EOF
+          )
+          gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
