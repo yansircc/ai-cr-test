@@ -119,8 +119,9 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           git fetch origin main
-          REVIEW=$(codex review --base origin/main 2>&1 | tail -n +2)
-          echo "$REVIEW" > /tmp/codex-review-result.txt
+          codex review --base origin/main 2>&1 > /tmp/codex-raw.txt || true
+          # 提取最后一个 "codex" 标记之后的内容（即真正的 review）
+          tac /tmp/codex-raw.txt | sed '/^codex$/q' | tac | sed '1d' > /tmp/codex-review-result.txt
 
       - name: Post Codex Review Comment
         env:
